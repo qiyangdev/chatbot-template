@@ -4,7 +4,13 @@ import * as React from "react"
 import { useChat } from "@ai-sdk/react"
 import { lastAssistantMessageIsCompleteWithToolCalls } from "ai"
 
-import { type GatewayModel } from "@/lib/models"
+import { createChatTransport } from "@/lib/chat-transport"
+import { calibrateContextUsage } from "@/lib/context-usage"
+import {
+  isThinkingLevelAllowed,
+  type ThinkingLevel,
+  type GatewayModel,
+} from "@/lib/models"
 import { type ChatUIMessage } from "@/tools"
 import { ChatMessage } from "@/components/chat-message"
 import { PromptForm } from "@/components/prompt-form"
@@ -20,6 +26,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty"
 import { Message, MessageContent } from "@/components/ui/message"
+import { Marker, MarkerContent } from "@/components/ui/marker"
 import {
   MessageScroller,
   MessageScrollerButton,
@@ -32,6 +39,11 @@ import { Trace, TraceIcon, TraceLine, TraceTitle } from "@/components/ui/trace"
 
 export function Chat({ models }: { models: GatewayModel[] }) {
   const [model, setModel] = React.useState(models[0]?.id ?? "")
+  const [thinkingLevels, setThinkingLevels] = React.useState<
+    Record<string, ThinkingLevel>
+  >({})
+  const [contextStartId, setContextStartId] = React.useState<string>()
+  const [chatTransport] = React.useState(createChatTransport)
 
   const {
     messages,
@@ -41,7 +53,20 @@ export function Chat({ models }: { models: GatewayModel[] }) {
     stop,
     error,
     addToolOutput,
+    setMessages,
   } = useChat<ChatUIMessage>({
+    transport: chatTransport.transport,
+    onFinish: ({ message, isAbort, isDisconnect, isError }): void => {
+      if (!isAbort && !isDisconnect && !isError) {
+        setMessages((current) => calibrateContextUsage(current, message))
+      }
+    },
+    onData: (part) => {
+      if (part.type === "data-compaction") {
+        chatTransport.setContextStartId(part.data.firstMessageId)
+        setContextStartId(part.data.firstMessageId)
+      }
+    },
     // Resume the conversation automatically once the user has answered the
     // ask_user questionnaire.
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
@@ -50,6 +75,13 @@ export function Chat({ models }: { models: GatewayModel[] }) {
   const resolvedModel = models.some((m) => m.id === model)
     ? model
     : (models[0]?.id ?? "")
+
+  const selectedModel = models.find((item) => item.id === resolvedModel)
+  const storedLevel = thinkingLevels[resolvedModel]
+  const thinkingLevel = isThinkingLevelAllowed(selectedModel, storedLevel)
+    ? storedLevel
+    : "provider-default"
+  const requestBody = { model: resolvedModel, thinkingLevel }
 
   const isBusy = status === "submitted" || status === "streaming"
 
@@ -79,10 +111,7 @@ export function Chat({ models }: { models: GatewayModel[] }) {
             <EmptyContent>
               <Suggestions
                 onSelect={(prompt) =>
-                  sendMessage(
-                    { text: prompt },
-                    { body: { model: resolvedModel } }
-                  )
+                  sendMessage({ text: prompt }, { body: requestBody })
                 }
               />
             </EmptyContent>
@@ -94,25 +123,31 @@ export function Chat({ models }: { models: GatewayModel[] }) {
             <MessageScrollerViewport>
               <MessageScrollerContent className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-6 py-6">
                 {messages.map((message) => (
-                  <MessageScrollerItem
-                    key={message.id}
-                    messageId={message.id}
-                    scrollAnchor={message.role === "user"}
-                  >
-                    <ChatMessage
-                      message={message}
-                      isStreaming={isBusy && message.id === lastMessage?.id}
-                      onRetry={
-                        !isBusy && message.id === lastMessage?.id
-                          ? () =>
-                              regenerate({
-                                messageId: message.id,
-                                body: { model: resolvedModel },
-                              })
-                          : undefined
-                      }
-                    />
-                  </MessageScrollerItem>
+                  <React.Fragment key={message.id}>
+                    {message.id === contextStartId && (
+                      <Marker variant="separator">
+                        <MarkerContent>Conversation compacted</MarkerContent>
+                      </Marker>
+                    )}
+                    <MessageScrollerItem
+                      messageId={message.id}
+                      scrollAnchor={message.role === "user"}
+                    >
+                      <ChatMessage
+                        message={message}
+                        isStreaming={isBusy && message.id === lastMessage?.id}
+                        onRetry={
+                          !isBusy && message.id === lastMessage?.id
+                            ? () =>
+                                regenerate({
+                                  messageId: message.id,
+                                  body: requestBody,
+                                })
+                            : undefined
+                        }
+                      />
+                    </MessageScrollerItem>
+                  </React.Fragment>
                 ))}
                 {status === "submitted" && (
                   <MessageScrollerItem messageId="thinking">
@@ -139,7 +174,7 @@ export function Chat({ models }: { models: GatewayModel[] }) {
                       tool: "ask_user",
                       toolCallId,
                       output: answer,
-                      options: { body: { model: resolvedModel } },
+                      options: { body: requestBody },
                     })
                   }
                 />
@@ -161,10 +196,17 @@ export function Chat({ models }: { models: GatewayModel[] }) {
           models={models}
           model={resolvedModel}
           onModelChange={setModel}
-          isBusy={isBusy}
-          onSubmit={(text) =>
-            sendMessage({ text }, { body: { model: resolvedModel } })
+          thinkingLevel={thinkingLevel}
+          onThinkingLevelChange={(level) =>
+            setThinkingLevels((current) => ({
+              ...current,
+              [resolvedModel]: level,
+            }))
           }
+          isBusy={isBusy}
+          messages={messages}
+          contextStartId={contextStartId}
+          onSubmit={(prompt) => sendMessage(prompt, { body: requestBody })}
           onStop={() => stop()}
         />
       </div>

@@ -1,5 +1,7 @@
 "use client"
 
+import * as React from "react"
+import { jsonBytes, MAX_TOOL_OUTPUT_BYTES } from "@/lib/chat-limits"
 import { type AskUserToolPart } from "@/tools"
 import {
   Questionnaire,
@@ -26,6 +28,7 @@ export function QuestionCard({
     answers: { question: string; answer: string }[]
   ) => void
 }) {
+  const [answerError, setAnswerError] = React.useState<string>()
   const questions = part.state === "input-available" ? part.input.questions : []
 
   return (
@@ -47,13 +50,18 @@ export function QuestionCard({
             onSubmit={(event) => {
               event.preventDefault()
               const formData = new FormData(event.currentTarget)
-              onAnswer(
-                part.toolCallId,
-                questions.map((question, index) => ({
-                  question: question.question,
-                  answer: String(formData.get(`q${index}`) ?? ""),
-                }))
-              )
+              const answers = questions.map((question, index) => ({
+                question: question.question,
+                answer: String(formData.get(`q${index}`) ?? ""),
+              }))
+              if (jsonBytes(answers) > MAX_TOOL_OUTPUT_BYTES) {
+                setAnswerError(
+                  "The answers are too large. Shorten your answers."
+                )
+                return
+              }
+              setAnswerError(undefined)
+              onAnswer(part.toolCallId, answers)
             }}
           >
             {questions.length > 1 && (
@@ -69,6 +77,7 @@ export function QuestionCard({
                     </QuestionnaireChoice>
                   ))}
                   <QuestionnaireInput
+                    maxLength={2000}
                     aria-label="Another answer"
                     placeholder="Type another answer…"
                   />
@@ -81,6 +90,11 @@ export function QuestionCard({
               <QuestionnaireNext>Next</QuestionnaireNext>
               <QuestionnaireSubmit>Answer</QuestionnaireSubmit>
             </QuestionnaireActions>
+            {answerError && (
+              <p role="alert" className="text-destructive">
+                {answerError}
+              </p>
+            )}
           </Questionnaire>
         )}
       </div>

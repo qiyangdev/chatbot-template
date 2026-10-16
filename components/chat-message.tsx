@@ -6,6 +6,7 @@ import {
   type TextMessagePart,
 } from "@/tools"
 import { MessageActions } from "@/components/message-actions"
+import { TextAttachment } from "@/components/text-attachment"
 import { AskUserPart } from "@/components/parts/ask-user-part"
 import { GithubRepoPart } from "@/components/parts/github-repo-part"
 import { ReasoningPart } from "@/components/parts/reasoning-part"
@@ -33,17 +34,26 @@ export function ChatMessage({
   onRetry?: () => void
 }) {
   if (message.role === "user") {
+    const text = message.parts
+      .filter((part) => part.type === "text")
+      .map((part) => part.text)
+      .join("")
+    const files = message.parts.filter((part) => part.type === "file")
     return (
       <Message align="end">
         <MessageContent>
-          <Bubble align="end" variant="muted">
-            <BubbleContent>
-              {message.parts
-                .filter((part) => part.type === "text")
-                .map((part) => part.text)
-                .join("")}
-            </BubbleContent>
-          </Bubble>
+          {files.length > 0 && (
+            <div className="flex max-w-full flex-wrap justify-end gap-2">
+              {files.map((file, index) => (
+                <TextAttachment key={`${file.filename}-${index}`} file={file} />
+              ))}
+            </div>
+          )}
+          {text && (
+            <Bubble align="end" variant="muted">
+              <BubbleContent>{text}</BubbleContent>
+            </Bubble>
+          )}
         </MessageContent>
       </Message>
     )

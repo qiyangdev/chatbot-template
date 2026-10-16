@@ -1,4 +1,5 @@
-import { type InferUITools, type UIDataTypes, type UIMessage } from "ai"
+import { type InferUITools, type UIMessage } from "ai"
+import type { ContextUsage } from "@/lib/context-usage"
 
 import { askUser } from "./ask_user"
 import { githubRepo } from "./github_repo"
@@ -18,8 +19,9 @@ export type ChatUIMessage = UIMessage<
   {
     // Milliseconds per reasoning part, keyed by its index in the message.
     reasoningDurations?: Record<number, number>
+    contextUsage?: ContextUsage
   },
-  UIDataTypes,
+  { compaction: { firstMessageId: string } },
   InferUITools<typeof baseTools> & {
     web_search: {
       input: { query?: string }

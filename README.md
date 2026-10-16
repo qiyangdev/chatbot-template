@@ -67,6 +67,20 @@ The route already validates the request body, restricts models to [lib/models.ts
 
 ## How it works
 
+### Input and context limits
+
+- Pasted or typed text reaching 12,000 Unicode code points becomes a `pasted-text.txt` attachment. Cards support preview and removal; short instructions can accompany files, and file-only messages are supported.
+- The attachment button to the left of the model selector opens an upload menu for TXT, Markdown, CSV, JSON and LOG files. Each message can contain up to four pasted or uploaded text attachments, each at most 512 KiB of UTF-8 text. Uploads preserve their filenames; duplicate names receive numbered suffixes. The server accepts only validated inline text attachments, decodes their full contents into model text, and never fetches client-supplied file URLs. Attachments remain file cards in chat history and count toward the model context budget.
+- The chat route reads at most 8 MiB of request data, including requests without a `Content-Length` header. Oversized requests return HTTP 413. This transport limit is independent of the model's context window.
+- Context is budgeted against each model's actual token window in `lib/models.ts`, verified against the Gateway model catalog. There is no fixed 64 KiB or 20-round history cutoff. The server checks the converted model messages before each tool-loop step, reserving 8,192 output tokens, 4,096 tool tokens and 10% estimation headroom.
+- Older rounds leave the model context as a whole; tool calls, results, and questionnaire continuations stay together. A current round that cannot fit is rejected instead of being truncated.
+- All messages remain visible. A shadcn Marker labeled `Conversation compacted` marks the start of the retained context after the server accepts compaction. Forgotten rounds are not sent again on subsequent requests.
+- Custom tool results are limited to 16 KiB. Questionnaires contain at most three questions, with answers limited to 2,000 characters each.
+
+The ring uses the selected model's full token window as its denominator. On completion, the latest model call's reported input plus output tokens calibrate its usage; cumulative billed tokens across tool steps are not added together. Drafts, ongoing streams and model switches use a local estimate. Local estimates are not provider tokenization; provider-internal tool context can differ, so the tooltip remains labeled estimated. Compaction removes old rounds; it does not generate a summary.
+
+Run `pnpm test` to check request limits, complete-round compaction, and tool continuation boundaries.
+
 - [app/api/chat/route.ts](app/api/chat/route.ts) streams responses with `streamText`
 - [components/chat.tsx](components/chat.tsx) renders the conversation with `useChat` and shadcn chat primitives.
 - [tools/](tools) defines the tools — one file per tool (the filename is the model-facing tool name), composed in [tools/index.ts](tools/index.ts): a server-executed GitHub repo lookup, the interactive `ask_user` questionnaire, and provider-native web search.

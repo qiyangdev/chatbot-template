@@ -1,12 +1,15 @@
 import { tool } from "ai"
 import { z } from "zod"
 
+import { jsonBytes, MAX_TOOL_OUTPUT_BYTES } from "@/lib/chat-limits"
+
 export const githubRepo = tool({
   description:
     "Get public stats for a GitHub repository: stars, forks, open issues, language, and description.",
   inputSchema: z.object({
     repo: z
       .string()
+      .max(140)
       .regex(/^[\w.-]+\/[\w.-]+$/, 'Must be in "owner/name" format.')
       .describe('The repository in "owner/name" format, e.g. "vercel/next.js"'),
   }),
@@ -37,7 +40,7 @@ export const githubRepo = tool({
         return { error: `Could not find repository ${repo}.` }
       }
       const data = await res.json()
-      return {
+      const output = {
         repo: String(data.full_name ?? repo),
         description: String(data.description ?? ""),
         stars: Number(data.stargazers_count ?? 0),
@@ -46,6 +49,9 @@ export const githubRepo = tool({
         language: String(data.language ?? "Unknown"),
         url: String(data.html_url ?? `https://github.com/${repo}`),
       }
+      return jsonBytes(output) <= MAX_TOOL_OUTPUT_BYTES
+        ? output
+        : { error: `The repository details for ${repo} are too large.` }
     } catch {
       return { error: `Could not reach GitHub for ${repo}.` }
     }
